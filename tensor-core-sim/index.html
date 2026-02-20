@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NVIDIA Tensor Core Simulator</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo-chip">
+    <div></div><div></div><div></div><div></div>
+  </div>
+  <div>
+    <h1>Tensor Core <span>Simulator</span></h1>
+    <div class="subtitle">// MMA Unit · D = A×B + C · Volta Architecture &nbsp;·&nbsp; <a href="../" style="color:var(--dim);text-decoration:none;font-size:0.8rem">← back</a></div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- CONTROLS -->
+  <div>
+    <div class="section-label">01 — Configuration</div>
+    <div class="card">
+      <div class="controls">
+        <div class="ctrl-group">
+          <label>Matrix Fill Mode</label>
+          <select id="fillMode">
+            <option value="random">Random (FP16 range)</option>
+            <option value="identity">Identity × scalar</option>
+            <option value="ones">All-Ones stress test</option>
+            <option value="custom">Diagonal pattern</option>
+          </select>
+        </div>
+        <div class="ctrl-group">
+          <label>Num MMA Operations</label>
+          <input type="range" id="numOps" min="1" max="64" value="16">
+          <div class="range-val" id="numOpsVal">16 ops</div>
+        </div>
+        <div class="ctrl-group">
+          <label>Warp Utilization %</label>
+          <input type="range" id="warpUtil" min="25" max="100" step="25" value="100">
+          <div class="range-val" id="warpUtilVal">100%</div>
+        </div>
+        <div>
+          <button class="btn-run" onclick="runSimulation()">▶ Execute MMA</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRECISION PIPELINE -->
+  <div>
+    <div class="section-label">02 — Precision Pipeline  FP16 → FP32 Accumulate</div>
+    <div class="card">
+      <div class="pipeline-wrap">
+        <div class="pipeline" id="pipeline">
+          <div class="pipe-stage">
+            <div class="pipe-box fp16" id="ps-a">A[4×4]<br>FP16 Input</div>
+            <div class="pipe-label">Operand A</div>
+            <div class="pipe-value" id="pv-a">—</div>
+          </div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-stage">
+            <div class="pipe-box fp16" id="ps-b">B[4×4]<br>FP16 Input</div>
+            <div class="pipe-label">Operand B</div>
+            <div class="pipe-value" id="pv-b">—</div>
+          </div>
+          <div class="pipe-arrow">⊗</div>
+          <div class="pipe-stage">
+            <div class="pipe-box op" id="ps-mul">4×4 FP16<br>Matrix Mul</div>
+            <div class="pipe-label">MUL stage</div>
+            <div class="pipe-value" id="pv-mul">—</div>
+          </div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-stage">
+            <div class="pipe-box fp32" id="ps-cast">Promote<br>FP16→FP32</div>
+            <div class="pipe-label">Precision Upcast</div>
+            <div class="pipe-value" id="pv-cast">—</div>
+          </div>
+          <div class="pipe-arrow">+</div>
+          <div class="pipe-stage">
+            <div class="pipe-box fp32" id="ps-c">C[4×4]<br>FP32 Accum</div>
+            <div class="pipe-label">Accumulator C</div>
+            <div class="pipe-value" id="pv-c">—</div>
+          </div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-stage">
+            <div class="pipe-box fp32" id="ps-d">D[4×4]<br>FP32 Output</div>
+            <div class="pipe-label">Result D</div>
+            <div class="pipe-value" id="pv-d">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Matrices -->
+      <div class="matrices-row" id="matrixDisplay">
+        <div class="matrix-block">
+          <div class="matrix-title">A <span class="dtype fp16">FP16</span></div>
+          <div class="matrix-grid" id="mat-A"></div>
+        </div>
+        <div class="matrix-block">
+          <div class="matrix-title">B <span class="dtype fp16">FP16</span></div>
+          <div class="matrix-grid" id="mat-B"></div>
+        </div>
+        <div class="matrix-block">
+          <div class="matrix-title">C (accumulator) <span class="dtype fp32">FP32</span></div>
+          <div class="matrix-grid" id="mat-C"></div>
+        </div>
+        <div class="matrix-block">
+          <div class="matrix-title">D = A×B+C <span class="dtype fp32">FP32</span></div>
+          <div class="matrix-grid" id="mat-D"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WARP FRAGMENT LAYOUT -->
+  <div>
+    <div class="section-label">03 — Warp Fragment Layout (32 threads cooperative)</div>
+    <div class="card">
+      <p style="font-size:0.8rem;color:var(--dim);margin-bottom:12px;font-family:'Share Tech Mono',monospace;">
+        In a real tensor core, 32 threads share fragments of A, B, D — no thread owns a full matrix.<br>
+        Colors show which threads hold which fragment responsibility.
+      </p>
+      <div class="warp-grid" id="warpGrid"></div>
+      <div class="fragment-legend">
+        <span><span class="leg-dot" style="background:var(--fp16)"></span>A fragment (FP16)</span>
+        <span><span class="leg-dot" style="background:var(--accent2)"></span>B fragment (FP16)</span>
+        <span><span class="leg-dot" style="background:var(--fp32)"></span>D fragment (FP32 out)</span>
+      </div>
+      <div class="thread-label" id="warpStatus">Run simulation to activate warp</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div>
+    <div class="section-label">04 — Performance Analysis</div>
+    <div class="charts-row">
+      <div class="card">
+        <div style="font-size:0.8rem;color:var(--dim);margin-bottom:12px;font-family:'Share Tech Mono',monospace;">
+          THROUGHPUT: Tensor Core vs CUDA Core (TOPS @ Volta SM)
+        </div>
+        <div class="chart-container">
+          <canvas id="throughputChart"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size:0.8rem;color:var(--dim);margin-bottom:12px;font-family:'Share Tech Mono',monospace;">
+          PRECISION PIPELINE: Bit-width across MMA stages
+        </div>
+        <div class="chart-container">
+          <canvas id="precisionChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div>
+    <div class="section-label">05 — Simulation Metrics</div>
+    <div class="stats-row">
+      <div class="stat-box"><span class="stat-val" id="st-ops">—</span><div class="stat-key">MMA Ops</div></div>
+      <div class="stat-box"><span class="stat-val" id="st-flops">—</span><div class="stat-key">FLOPs</div></div>
+      <div class="stat-box"><span class="stat-val" id="st-cycles">—</span><div class="stat-key">Tensor Cycles</div></div>
+      <div class="stat-box"><span class="stat-val" id="st-cuda-cycles">—</span><div class="stat-key">CUDA Equiv Cycles</div></div>
+      <div class="stat-box"><span class="stat-val" id="st-speedup">—</span><div class="stat-key">Speedup</div></div>
+      <div class="stat-box"><span class="stat-val" id="st-err">—</span><div class="stat-key">FP16 vs FP32 Err</div></div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div>
+    <div class="section-label">06 — Execution Log</div>
+    <div class="log-box" id="logBox">
+      <div class="log-line">&gt; Tensor Core Simulator initialized</div>
+      <div class="log-line">&gt; Configure parameters and press EXECUTE MMA</div>
+    </div>
+  </div>
+
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>

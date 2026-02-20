@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPU Architecture Deep Dive</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="chip-icon"><div></div><div></div><div></div><div></div></div>
+    <span>GPU ARCHITECTURE</span>
+  </div>
+  <div class="tab active" onclick="show(0)"><span class="num">01</span>Reduction Tree</div>
+  <div class="tab" onclick="show(1)"><span class="num">02</span>Silicon Routing</div>
+  <div class="tab" onclick="show(2)"><span class="num">03</span>Dot → Matmul</div>
+  <div class="tab" onclick="show(3)"><span class="num">04</span>SM Hierarchy</div>
+  <div class="tab" onclick="show(4)"><span class="num">05</span>Transformer</div>
+  <div class="tab" onclick="window.location='../'" style="margin-left:auto"><span class="num">←</span>Home</div>
+</nav>
+
+<div class="content">
+
+<!-- ═══════════════════════════════════════════
+     PANEL 1 — REDUCTION TREE
+═══════════════════════════════════════════ -->
+<div class="panel active" id="p0">
+<div class="panel-inner">
+
+  <div class="theory">
+    <strong>Binary Reduction Tree</strong> — the adder structure inside every dot product unit.<br>
+    N multiplier outputs → summed in <span class="key">log₂(N) levels</span> of adders, not N-1 sequential adds.
+    Each level adds 1 bit of width to prevent overflow. This is why the tensor core fits in ~1 cycle despite 64 parallel multipliers.
+    <pre>
+N=4:  [p0]  [p1]  [p2]  [p3]    ← 16-bit products
+           ↘ ↙        ↘ ↙
+         [add0]      [add1]      ← 17-bit (need 1 extra bit)
+              ↘      ↙
+              [add2]             ← 18-bit
+                 ↓
+              [+acc c]           ← 32-bit final (FP32 accumulator)
+    </pre>
+    For N=64 (full tensor core): depth = log₂(64) = <span class="key">6 levels</span>. Max clock freq determined by those 6 adder delays, not 64.
+  </div>
+
+  <div class="card">
+    <div class="card-title">Configuration</div>
+    <div class="ctrl-row">
+      <div class="ctrl">
+        <label>Inputs N</label>
+        <select id="treeN">
+          <option value="4">N = 4 (your slide)</option>
+          <option value="8">N = 8</option>
+          <option value="16">N = 16</option>
+          <option value="64">N = 64 (full tensor core)</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label>Input bit width</label>
+        <select id="treeBits">
+          <option value="8">8-bit (INT8)</option>
+          <option value="16" selected>16-bit (FP16)</option>
+        </select>
+      </div>
+      <button class="btn" onclick="buildTree()">Build Tree</button>
+      <button class="btn sec" onclick="animateTree()">Animate Propagation</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Tree Visualization</div>
+    <div id="tree-svg-wrap"><svg id="tree-svg" width="900" height="320"></svg></div>
+    <div class="tile-info" id="tree-info" style="margin-top:12px"></div>
+  </div>
+
+  <div class="stats" id="tree-stats"></div>
+
+  <div class="card">
+    <div class="card-title">Depth vs N — Why log₂ Matters</div>
+    <div class="chart-container"><canvas id="depthChart"></canvas></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PANEL 2 — SILICON ROUTING
+═══════════════════════════════════════════ -->
+<div class="panel" id="p1">
+<div class="panel-inner">
+
+  <div class="theory">
+    <strong>Wire routing is the hidden cost of spatial parallelism.</strong><br>
+    At 5nm, a wire's capacitance determines <span class="key">switching power (P = CV²f)</span> and its length determines
+    propagation delay. For a tensor core's input fanout: all A and B matrix elements must reach every relevant
+    multiplier in the same cycle. This requires <strong>wide, dedicated read ports</strong> on the register file —
+    physically separate from scalar register file ports.
+    <pre>
+Volta register file per SM: 256KB, 128-bit wide ports
+For 4×4×4 MMA: need 256 bits (A) + 256 bits (B) simultaneously
+→ 4 × 128-bit reads per cycle just for operand delivery
+→ Each extra multiplier doubles routing pressure, not just logic area
+    </pre>
+    Area breakdown of a modern ML accelerator SM roughly follows: <span class="key">~40% compute, ~35% register file + routing, ~25% L1/shared mem.</span>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Configuration</div>
+    <div class="ctrl-row">
+      <div class="ctrl">
+        <label>MMA Size</label>
+        <select id="mmaSz" onchange="updateRouting()">
+          <option value="4">4×4 (your dot product)</option>
+          <option value="8">8×8</option>
+          <option value="16" selected>16×16 (Ampere)</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label>Process Node</label>
+        <select id="procNode" onchange="updateRouting()">
+          <option value="12">12nm (Volta)</option>
+          <option value="7">7nm (Ampere A100)</option>
+          <option value="4">4nm (Hopper H100)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Die Area Breakdown (estimated, relative)</div>
+    <div class="area-bars" id="area-bars"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Input Fanout — Wire Load Visualization</div>
+    <div style="font-size:.78rem;color:var(--dim2);font-family:'IBM Plex Mono',monospace;margin-bottom:8px" id="wire-desc"></div>
+    <div class="routing-grid" id="routing-grid"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Routing Complexity vs MMA Size</div>
+    <div class="chart-container"><canvas id="routingChart"></canvas></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PANEL 3 — DOT PRODUCT → MATMUL
+═══════════════════════════════════════════ -->
+<div class="panel" id="p2">
+<div class="panel-inner">
+
+  <div class="theory">
+    <strong>A 4×4×4 MMA is just 16 dot products running in parallel.</strong><br>
+    C[i][j] = dot(row <code>i</code> of A, col <code>j</code> of B).
+    For a 4×4 output matrix, that's 16 (i,j) pairs → 16 dot product units → 16×4 = <span class="key">64 multipliers total</span>.<br>
+    Large GEMMs (e.g. 1024×1024) are <strong>tiled</strong>: broken into 4×4 (or 16×16) blocks that fit in
+    shared memory (L1), fed to tensor cores tile-by-tile, with results accumulated in FP32.
+    <pre>
+GEMM(A[M×K], B[K×N]) → C[M×N]
+  for tile_m in range(M/4):
+    for tile_n in range(N/4):
+      C_tile = zeros(4,4)          ← FP32 accumulator
+      for tile_k in range(K/4):
+        A_tile = A[tile_m, tile_k]  ← load 4×4 FP16 tile
+        B_tile = B[tile_k, tile_n]  ← load 4×4 FP16 tile
+        C_tile += A_tile @ B_tile   ← one tensor core MMA
+      store C_tile → C[tile_m, tile_n]
+    </pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Interactive MMA — Click a C[i][j] cell to see its dot product</div>
+    <div style="overflow-x:auto">
+    <div class="matmul-wrap" id="matmul-wrap">
+      <!-- built by JS -->
+    </div>
+    </div>
+    <div class="tile-info" id="dot-info" style="margin-top:12px;min-height:56px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">GEMM Tiling Simulation</div>
+    <div class="ctrl-row">
+      <div class="ctrl">
+        <label>Matrix M=N=K</label>
+        <select id="gemmSz">
+          <option value="8">8 (2×2 tiles)</option>
+          <option value="16" selected>16 (4×4 tiles)</option>
+          <option value="32">32 (8×8 tiles)</option>
+        </select>
+      </div>
+      <button class="btn" onclick="runGEMM()">Simulate Tiling</button>
+    </div>
+    <div style="margin-top:14px">
+      <div class="tile-info" id="gemm-info"></div>
+      <div id="gemm-progress" style="margin-top:10px;height:6px;background:var(--bg3);border:1px solid var(--bdr)">
+        <div id="gemm-bar" style="height:100%;width:0;background:var(--acc);transition:width .3s"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Multipliers Required vs Matrix Dimension</div>
+    <div class="chart-container"><canvas id="mulChart"></canvas></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PANEL 4 — SM HIERARCHY
+═══════════════════════════════════════════ -->
+<div class="panel" id="p3">
+<div class="panel-inner">
+
+  <div class="theory">
+    <strong>The SM (Streaming Multiprocessor) is the building block of the GPU.</strong><br>
+    Volta V100: 80 SMs × 8 tensor cores × 64 FMAs/cycle × 1.53GHz ≈ <span class="key">125 TFLOPS FP16</span>.<br>
+    A warp (32 threads) collectively issues <code>HMMA</code> instructions. Each thread holds a <strong>fragment</strong>
+    — a subset of the matrix — not the whole thing. The tensor core reads all fragments simultaneously,
+    computes MMA, scatters results back to thread registers.
+    <pre>
+Thread  0–7:   hold rows of A fragment (FP16)
+Thread  8–15:  hold cols of B fragment (FP16)
+Thread 16–31:  hold C accumulator fragment (FP32) → receive D output
+    </pre>
+    Warp occupancy (how many warps are active per SM) determines latency hiding.
+    Memory latency (~600 cycles) is hidden by switching to another warp while data loads.
+  </div>
+
+  <div class="card">
+    <div class="card-title">GPU Die — Active SM Simulation</div>
+    <div class="ctrl-row" style="margin-bottom:14px">
+      <div class="ctrl">
+        <label>GPU Model</label>
+        <select id="gpuModel" onchange="buildGPU()">
+          <option value="v100">V100 (80 SM, 8 TC/SM)</option>
+          <option value="a100">A100 (108 SM, 4 TC/SM)</option>
+          <option value="h100">H100 (132 SM, 4 TC/SM)</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label>SM Utilization %</label>
+        <input type="range" id="smUtil" min="10" max="100" step="10" value="100" oninput="updateSMUtil()">
+        <div class="rv" id="smUtilV">100%</div>
+      </div>
+      <button class="btn" onclick="fireSMs()">Fire Warp</button>
+    </div>
+    <div class="gpu-die" id="gpu-die"></div>
+  </div>
+
+  <div class="stats" id="gpu-stats"></div>
+
+  <div class="card">
+    <div class="card-title">Theoretical TFLOPS — GPU Comparison</div>
+    <div class="chart-container"><canvas id="gpuChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Warp Occupancy vs Latency Hiding</div>
+    <div class="chart-container" style="height:200px"><canvas id="occupancyChart"></canvas></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PANEL 5 — TRANSFORMER
+═══════════════════════════════════════════ -->
+<div class="panel" id="p4">
+<div class="panel-inner">
+
+  <div class="theory">
+    <strong>Why transformers are tensor core workloads end-to-end.</strong><br>
+    Attention: <code>Out = softmax(QKᵀ / √d) · V</code> — two GEMMs + softmax.<br>
+    MLP layers: two GEMMs (up-project, down-project). Layer norm: element-wise (not a GEMM).<br>
+    For GPT-4 class: d_model=12288, 96 layers, 96 heads → <span class="key">~2.6 × 10¹⁵ FLOPs per forward pass</span>.<br>
+    At H100 peak (989 TFLOPS FP16): ~2.6 seconds/pass without batching.
+    Real inference: batch scheduling + KV cache + tensor parallelism across multiple GPUs.
+    <pre>
+Operation          FLOPs (per token, GPT-3 175B)
+──────────────────────────────────────────────
+QKᵀ attention        2 × seq_len × d_model²  → GEMM → tensor core
+Softmax              O(seq_len²)              → elementwise, NOT TC
+V projection         2 × seq_len × d_model²  → GEMM → tensor core
+MLP up               2 × 4 × d_model²        → GEMM → tensor core
+MLP down             2 × 4 × d_model²        → GEMM → tensor core
+──────────────────────────────────────────────
+~95% of FLOPs are GEMMs → tensor core utilization
+    </pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Transformer Forward Pass — FLOP Breakdown</div>
+    <div class="ctrl-row">
+      <div class="ctrl">
+        <label>Model</label>
+        <select id="modelSz" onchange="updateTransformer()">
+          <option value="gpt2">GPT-2 (1.5B)</option>
+          <option value="gpt3">GPT-3 (175B)</option>
+          <option value="llama3">LLaMA-3 70B</option>
+          <option value="gpt4class">GPT-4 class (est.)</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label>Sequence Length</label>
+        <input type="range" id="seqLen" min="128" max="8192" step="128" value="2048" oninput="this.nextElementSibling.textContent=this.value+' tok';updateTransformer()">
+        <div class="rv">2048 tok</div>
+      </div>
+      <div class="ctrl">
+        <label>GPU</label>
+        <select id="infGPU" onchange="updateTransformer()">
+          <option value="v100">V100 (125 TFLOPS)</option>
+          <option value="a100">A100 (312 TFLOPS)</option>
+          <option value="h100">H100 (989 TFLOPS)</option>
+        </select>
+      </div>
+    </div>
+    <div class="flops-chart-container" style="margin-top:16px"><canvas id="flopsChart"></canvas></div>
+  </div>
+
+  <div class="stats" id="transformer-stats"></div>
+
+  <div class="card">
+    <div class="card-title">Attention — What Runs on Tensor Cores vs Not</div>
+    <div class="attn-diagram" id="attn-diagram">
+      <div class="attn-row">
+        <div class="attn-block gemm">Q·Kᵀ<br><small>GEMM → TC ✓</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block" style="border-color:var(--org);color:var(--org)">÷√d · Softmax<br><small>elementwise ✗</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block gemm">·V<br><small>GEMM → TC ✓</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block" style="border-color:var(--yel);color:var(--yel)">Proj Out<br><small>GEMM → TC ✓</small></div>
+      </div>
+      <div class="attn-row" style="margin-top:16px">
+        <div class="attn-block" style="border-color:var(--org);color:var(--org)">MLP Up<br><small>GEMM → TC ✓</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block" style="border-color:var(--org);color:var(--org)">GELU<br><small>elementwise ✗</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block" style="border-color:var(--org);color:var(--org)">MLP Down<br><small>GEMM → TC ✓</small></div>
+        <div class="attn-arrow">→</div>
+        <div class="attn-block" style="border-color:var(--dim);color:var(--dim)">Layer Norm<br><small>elementwise ✗</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Memory Bandwidth Bottleneck — Roofline Model</div>
+    <div class="chart-container"><canvas id="rooflineChart"></canvas></div>
+  </div>
+
+</div>
+</div>
+
+</div><!-- end content -->
+
+<script src="main.js"></script>
+</body>
+</html>

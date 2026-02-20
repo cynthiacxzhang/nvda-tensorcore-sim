@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NVIDIA TensorCore Sim</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+
+:root {
+  --bg:   #08090b;
+  --bg2:  #0f1117;
+  --bg3:  #171a23;
+  --bdr:  #252b3a;
+  --text: #dce5f0;
+  --dim:  #5a6a80;
+  --dim2: #8a9ab0;
+  --acc:  #5b8fff;
+  --grn:  #2ecc7a;
+  --org:  #f0853a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 48px 64px 40px;
+  border-bottom: 1px solid var(--bdr);
+}
+
+.logo-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.chip-icon {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  width: 28px; height: 28px;
+}
+.chip-icon div { background: var(--acc); opacity: 0.8; }
+
+.site-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  letter-spacing: 3px;
+  color: var(--acc);
+  text-transform: uppercase;
+}
+
+h1 {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+  margin-bottom: 10px;
+}
+h1 span { color: var(--acc); }
+
+.tagline {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--dim2);
+  line-height: 1.7;
+  max-width: 620px;
+}
+
+.main {
+  padding: 48px 64px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+
+/* ── TOOL CARDS ── */
+.tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 900px) { .tools { grid-template-columns: 1fr; } }
+
+.tool-card {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  padding: 28px 32px;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.tool-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  transition: opacity 0.2s;
+  opacity: 0.6;
+}
+.tool-card.sim::before { background: linear-gradient(90deg, transparent, #00d4ff, transparent); }
+.tool-card.dive::before { background: linear-gradient(90deg, transparent, var(--acc), transparent); }
+.tool-card:hover { border-color: var(--acc); box-shadow: 0 0 24px rgba(91,143,255,0.08); }
+.tool-card:hover::before { opacity: 1; }
+
+.tool-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-tag::after { content: ''; flex: 1; height: 1px; background: var(--bdr); }
+
+.tool-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.tool-desc {
+  font-size: 0.85rem;
+  color: var(--dim2);
+  line-height: 1.7;
+}
+
+.tool-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  padding: 3px 9px;
+  border: 1px solid var(--bdr);
+  color: var(--dim2);
+  background: var(--bg3);
+}
+.pill.hi { border-color: var(--acc); color: var(--acc); }
+
+.tool-cta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--acc);
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+/* ── NOTES SECTION ── */
+.notes-section {
+  border-top: 1px solid var(--bdr);
+  padding-top: 36px;
+}
+
+.section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 2.5px;
+  color: var(--acc);
+  text-transform: uppercase;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-label::after { content: ''; flex: 1; height: 1px; background: var(--bdr); }
+
+.notes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 700px) { .notes-grid { grid-template-columns: 1fr; } }
+
+.note-link {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  padding: 18px 22px;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  transition: border-color 0.2s;
+}
+.note-link:hover { border-color: var(--dim2); }
+
+.note-icon {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.1rem;
+  color: var(--dim);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.note-name {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--dim2);
+  margin-bottom: 4px;
+}
+
+.note-desc {
+  font-size: 0.82rem;
+  color: var(--dim);
+  line-height: 1.6;
+}
+
+/* ── FOOTER ── */
+footer {
+  padding: 24px 64px;
+  border-top: 1px solid var(--bdr);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--dim);
+  display: flex;
+  gap: 24px;
+}
+footer span { color: var(--dim2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-row">
+    <div class="chip-icon"><div></div><div></div><div></div><div></div></div>
+    <div class="site-title">nvda-tensorcore-sim</div>
+  </div>
+  <h1>Tensor Core <span>&amp;</span> GPU Architecture</h1>
+  <p class="tagline">
+    Interactive study environment for understanding NVIDIA GPU architecture —
+    from the MMA instruction up through GEMM tiling, SM hierarchy, and transformer FLOP budgets.
+  </p>
+</header>
+
+<div class="main">
+
+  <div>
+    <div class="section-label">Tools</div>
+    <div class="tools">
+
+      <a class="tool-card sim" href="tensor-core-sim/">
+        <div class="tool-tag">01 — Simulator</div>
+        <div class="tool-name">Tensor Core Simulator</div>
+        <div class="tool-desc">
+          Simulate the MMA operation <strong>D = A×B + C</strong> on a Volta 4×4×4 tensor core.
+          Step through the FP16 → FP32 precision pipeline, inspect matrix operands live,
+          and see warp fragment layout across 32 threads.
+        </div>
+        <div class="tool-pills">
+          <span class="pill hi">D = A×B + C</span>
+          <span class="pill">FP16 → FP32</span>
+          <span class="pill">warp fragments</span>
+          <span class="pill">throughput charts</span>
+        </div>
+        <div class="tool-cta">→ open simulator</div>
+      </a>
+
+      <a class="tool-card dive" href="gpu-deep-dive/">
+        <div class="tool-tag">02 — Learning Path</div>
+        <div class="tool-name">GPU Architecture Deep Dive</div>
+        <div class="tool-desc">
+          Five-panel interactive learning path through the hardware that makes tensor cores possible:
+          reduction trees, silicon routing, dot-product → matmul composition,
+          SM hierarchy, and transformer FLOP/memory analysis.
+        </div>
+        <div class="tool-pills">
+          <span class="pill hi">reduction tree</span>
+          <span class="pill">silicon routing</span>
+          <span class="pill">GEMM tiling</span>
+          <span class="pill">roofline model</span>
+        </div>
+        <div class="tool-cta">→ open learning path</div>
+      </a>
+
+    </div>
+  </div>
+
+  <div class="notes-section">
+    <div class="section-label">Notes</div>
+    <div class="notes-grid">
+
+      <a class="note-link" href="notes/running-notes.md">
+        <div class="note-icon">//</div>
+        <div>
+          <div class="note-name">running-notes.md</div>
+          <div class="note-desc">Progressive notes written while studying these simulations — FP16 precision, MMA semantics, warp cooperation, GEMM tiling, roofline model, transformer FLOP breakdown.</div>
+        </div>
+      </a>
+
+      <a class="note-link" href="notes/systems-design.md">
+        <div class="note-icon">∑</div>
+        <div>
+          <div class="note-name">systems-design.md</div>
+          <div class="note-desc">Architectural reasoning for the project structure — why static HTML, what's accurate vs simplified in the simulations, and extension ideas.</div>
+        </div>
+      </a>
+
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>stack:</span> HTML · CSS · JS · Chart.js &nbsp;|&nbsp;
+  <span>serve:</span> npm start &nbsp;|&nbsp;
+  <span>arch:</span> Volta (V100) · Ampere (A100) · Hopper (H100)
+</footer>
+
+</body>
+</html>

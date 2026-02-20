@@ -1,0 +1,12 @@
+{
+  "name": "nvda-tensorcore-sim",
+  "version": "1.0.0",
+  "description": "Interactive NVIDIA Tensor Core simulator and GPU architecture learning path",
+  "scripts": {
+    "start": "npx serve . --listen 3000",
+    "dev": "npx serve . --listen 3000 --no-clipboard"
+  },
+  "devDependencies": {
+    "serve": "^14.2.3"
+  }
+}
