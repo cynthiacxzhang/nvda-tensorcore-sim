@@ -5,7 +5,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(gh repo create:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(git push:*)",
+      "Bash(gh api:*)",
+      "mcp__ide__executeCode",
+      "Bash(python3:*)"
     ]
   }
 }
