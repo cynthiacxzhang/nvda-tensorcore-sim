@@ -2,6 +2,8 @@
 
 Interactive browser-based study environment for NVIDIA GPU architecture and tensor core internals — built for understanding the hardware stack beneath LLM training and inference.
 
+Demo: https://cynthiacxzhang.github.io/nvda-tensorcore-sim/
+
 ## Tools
 
 ### Tensor Core Simulator (`tensor-core-sim/`)
